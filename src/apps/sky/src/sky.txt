@@ -1,0 +1,24 @@
+sky
+
+##
+star_ls
+/mathxyz/assets/stitching/R3
+--pattern
+*.jpg
+--r
+--print
+
+# aaa
+star_img_read_and_write
+null
+/mathxyz/z
+--dst_suffix
+png
+
+star_img_read_and_write
+null
+/mathxyz/z2
+--dst_suffix
+bmp
+
+star_ls_clear

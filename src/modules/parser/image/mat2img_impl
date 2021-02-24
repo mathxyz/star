@@ -1,0 +1,418 @@
+#pragma once
+
+#include "inner.h"
+#include "../png_parser/io_png.h"
+#include "../jpeg_parser/io_jpeg.h"
+#include "../bmp_parser/io_bmp.h"
+#include "../yuv_parser/io_yuv.h"
+
+
+namespace star {
+    struct StarImageConfig {
+    public:
+        NumN format;
+        NumN nr;
+        NumN nc;
+        VecN pixel;
+
+        StarImageConfig() {
+            init();
+        }
+
+        StarImageConfig(const StarImageConfig &config) {
+            init();
+            *this = config;
+        }
+
+        StarImageConfig &operator=(const StarImageConfig &config) {
+            format = config.format;
+            nr = config.nr;
+            nc = config.nc;
+            pixel = config.pixel;
+            return *this;
+        }
+
+        void init() {
+            nr = 0;
+            nc = 0;
+            format = 0;
+            pixel.setSize(4);
+            pixel = 255;
+        }
+
+        void log(const char *name = 0) const {
+            log(std::cout, name);
+        }
+
+        void log(std::ostream &io, const char *name = 0) const {
+            if (name) {
+                io << "name: " << name << "\n";
+            }
+            io << "nr: " << nr << "\n"
+               << "nc: " << nc << "\n"
+               << "format: " << star_image_get_format_string(format) << "\n";
+            pixel.logInfo(io, "pixel");
+
+        }
+    };
+
+    namespace detail {
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_jpg_read(Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_JPEG
+            MATH21_ASSERT(0, "The library is compiled without jpeg support");
+#else
+            size_t nr, nc, nch;
+            unsigned char *img = io_jpg_read_u8(path, &nc, &nr, &nch);
+            if (img == 0) {
+                printf("io_jpg_read_u8 fail!\n");
+                return;
+            }
+            MATH21_ASSERT(nch == 1 || nch == 3 || nch == 4, "channel is " << nch << " which not 1, 3 or 4");
+            MATH21_ASSERT(nr >= 1 && nc >= 1, "empty matrix");
+            if (m.isEmpty()) {
+                if (nch == 1) {
+                    m.setSize(nr, nc);
+                } else {
+                    m.setSize(nch, nr, nc);
+                }
+            } else {
+                MATH21_ASSERT((m.dims() == 2 && 1 == nch && m.dim(1) == nr && m.dim(2) == nc) ||
+                              (m.dims() == 3 && m.dim(1) == nch && m.dim(2) == nr && m.dim(3) == nc),
+                              "tensor shape doesn't match image size\n"
+                              "You can either resize the tensor or make it empty.");
+
+                MATH21_ASSERT(m.dims() == 3 && m.dim(1) == nch && m.dim(2) == nr && m.dim(3) == nc,
+                              "tensor shape doesn't match image size\n"
+                              "You can either resize the tensor or make it empty.");
+            }
+
+            NumN k = 0;
+            if (nch == 1) {
+                for (NumN i2 = 1; i2 <= m.dim(1); i2++) {
+                    for (NumN i3 = 1; i3 <= m.dim(2); i3++) {
+                        m(i2, i3) = (T) img[k];
+                        k++;
+                    }
+                }
+            } else {
+                if (m.isStandard()) {
+                    T *m_data = math21_memory_tensor_data_address(m);
+                    math21_image_convert_r_c_ch_to_ch_r_c(img, m_data, m.dim(2), m.dim(3), m.dim(1));
+                } else {
+                    for (NumN i2 = 1; i2 <= m.dim(2); i2++) {
+                        for (NumN i3 = 1; i3 <= m.dim(3); i3++) {
+                            for (NumN i1 = 1; i1 <= m.dim(1); i1++) {
+                                m(i1, i2, i3) = (T) img[k];
+                                k++;
+                            }
+                        }
+                    }
+                }
+            }
+            free(img);
+#endif
+        }
+
+
+//m is deinterlaced (RRR..GGG..BBB, AAA), and m(i1, i2, i3) is in [0, 255].
+// alpha channel will be ignored.
+        template<typename T>
+        void img_jpg_write(const Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_JPEG
+            MATH21_ASSERT(0, "The library is compiled without jpeg support");
+#else
+            if (m.isEmpty()) {
+                return;
+            }
+            MATH21_ASSERT(m.dims() == 2 || m.dims() == 3, "shape doesn't match image");
+            if (m.dims() == 3) {
+                MATH21_ASSERT(m.dim(1) == 1 || m.dim(1) == 3 || m.dim(1) == 4,
+                              "not 1, 3 or 4 channels, channels: " << m.dim(1));
+            }
+            NumN volume;
+            NumN nch;
+            volume = m.volume();
+            if (m.dims() == 3) {
+                if (m.dim(1) == 4) {
+                    volume = volume * 3 / 4;
+                    nch = 3;
+                } else {
+                    nch = m.dim(1);
+                }
+            } else {
+                nch = 1;
+            }
+
+            unsigned char *img = (unsigned char *) malloc(volume * sizeof(*img));
+            MATH21_ASSERT(img, "no space")
+
+            NumN k = 0;
+            T tmp;
+            if (m.dims() == 3) {
+                if (m.isStandard() && m.dim(1) < 4) {
+                    const T *m_data = math21_memory_tensor_data_address(m);
+                    math21_image_convert_ch_r_c_to_r_c_ch(m_data, img, m.dim(2), m.dim(3), nch);
+                } else {
+                    for (NumN i2 = 1; i2 <= m.dim(2); i2++) {
+                        for (NumN i3 = 1; i3 <= m.dim(3); i3++) {
+                            for (NumN i1 = 1; i1 <= nch; i1++) {
+                                tmp = m(i1, i2, i3);
+                                img[k] = (unsigned char) (tmp < 0 ? 0 :
+                                                          (tmp > 255 ? 255 : tmp));
+                                k++;
+                            }
+                        }
+                    }
+                }
+                io_jpg_write_u8(path, img, m.dim(3), m.dim(2), nch, 100);
+            } else {
+                for (NumN i1 = 1; i1 <= m.dim(1); i1++) {
+                    for (NumN i2 = 1; i2 <= m.dim(2); i2++) {
+                        tmp = m(i1, i2);
+                        img[k] = (unsigned char) (tmp < 0 ? 0 :
+                                                  (tmp > 255 ? 255 : tmp));
+                        k++;
+                    }
+                }
+                io_jpg_write_u8(path, img, m.dim(2), m.dim(1), nch, 100);
+            }
+            free(img);
+#endif
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB, AAA), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_png_write(const Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_PNG
+            MATH21_ASSERT(0, "The library is compiled without png support");
+#else
+            if (m.isEmpty()) {
+                return;
+            }
+            MATH21_ASSERT(m.dims() == 2 || m.dims() == 3, "shape doesn't match image");
+            if (m.dims() == 3) {
+                MATH21_ASSERT(m.dim(1) == 1 || m.dim(1) == 3 || m.dim(1) == 4,
+                              "not 1, 3 or 4 channels, channels: " << m.dim(1));
+            }
+            float *img = (float *) malloc(m.volume() * sizeof(float));
+            NumN k = 0;
+            if (m.dims() == 3) {
+                if (m.isStandard()) {
+                    const T *m_data = math21_memory_tensor_data_address(m);
+                    math21_c_array_convert(m.volume(), m_data, img);
+                } else {
+                    for (NumN i1 = 1; i1 <= m.dim(1); i1++) {
+                        for (NumN i2 = 1; i2 <= m.dim(2); i2++) {
+                            for (NumN i3 = 1; i3 <= m.dim(3); i3++) {
+                                img[k] = (float) m(i1, i2, i3);
+                                k++;
+                            }
+                        }
+                    }
+                }
+                // todo: remove this wrapper to speed up.
+                io_png_write_f32(path, img, m.dim(3), m.dim(2), m.dim(1));
+            } else {
+                for (NumN i1 = 1; i1 <= m.dim(1); i1++) {
+                    for (NumN i2 = 1; i2 <= m.dim(2); i2++) {
+                        img[k] = (float) m(i1, i2);
+                        k++;
+                    }
+                }
+                io_png_write_f32(path, img, m.dim(2), m.dim(1), 1);
+            }
+            free(img);
+#endif
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_png_read(Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_PNG
+            MATH21_ASSERT(0, "The library is compiled without png support");
+#else
+            size_t nr, nc, nch;
+            float *img = io_png_read_f32(path, &nc, &nr, &nch);
+            if (img == 0) {
+                printf("io_png_read_f32 fail!\n");
+                return;
+            }
+            MATH21_ASSERT(nch == 1 || nch == 3 || nch == 4, "channel is " << nch << " which not 1, 3 or 4");
+            MATH21_ASSERT(nr >= 1 && nc >= 1, "empty matrix");
+            if (m.isEmpty()) {
+                if (nch == 1) {
+                    m.setSize(nr, nc);
+                } else {
+                    m.setSize(nch, nr, nc);
+                }
+            } else {
+                MATH21_ASSERT((m.dims() == 2 && 1 == nch && m.dim(1) == nr && m.dim(2) == nc) ||
+                              (m.dims() == 3 && m.dim(1) == nch && m.dim(2) == nr && m.dim(3) == nc),
+                              "tensor shape doesn't match image size\n"
+                              "You can either resize the tensor or make it empty.");
+            }
+
+            NumN k = 0;
+            NumN i1, i2, i3;
+            if (nch == 1) {
+                for (i1 = 1; i1 <= m.dim(1); ++i1) {
+                    for (i2 = 1; i2 <= m.dim(2); ++i2) {
+                        m(i1, i2) = (T) img[k];
+                        k++;
+                    }
+                }
+            } else {
+                if (m.isStandard()) {
+                    T *m_data = math21_memory_tensor_data_address(m);
+                    math21_c_array_convert(m.volume(), img, m_data);
+                } else {
+                    for (i1 = 1; i1 <= m.dim(1); ++i1) {
+                        for (i2 = 1; i2 <= m.dim(2); ++i2) {
+                            for (i3 = 1; i3 <= m.dim(3); ++i3) {
+                                m(i1, i2, i3) = (T) img[k];
+                                k++;
+                            }
+                        }
+                    }
+                }
+            }
+            free(img);
+#endif
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_bmp_read(Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_BMP
+            MATH21_ASSERT(0, "The library is compiled without bmp support");
+#else
+            io_bmp_read(path, m);
+#endif
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_bmp_write(const Tensor<T> &m, const char *path) {
+#ifndef STAR_FLAG_USE_BMP
+            MATH21_ASSERT(0, "The library is compiled without bmp support");
+#else
+            if (m.isEmpty()) {
+                m21log("image is empty");
+                return;
+            }
+            MATH21_ASSERT(m.dims() == 2 || m.dims() == 3, "shape doesn't match image");
+            if (m.dims() == 3) {
+                MATH21_ASSERT(m.dim(1) == 1 || m.dim(1) == 3 || m.dim(1) == 4,
+                              "not 1, 3 or 4 channels, channels: " << m.dim(1));
+            }
+
+            if (typeid(T) == typeid(NumR)) {
+                io_bmp_write(path, m);
+            } else {
+                TenR B;
+                B.setSize(m.shape());
+                math21_operator_tensor_assign_elementwise(B, m);
+                io_bmp_write(path, B);
+            }
+#endif
+        }
+
+        template<typename T>
+        void img_mat_read(Tensor<T> &m, const char *path) {
+            math21_io_generic_type_read_from_file(m, path, 0);
+        }
+
+        template<typename T>
+        void img_blank_read(Tensor<T> &m, const StarImageConfig &config = StarImageConfig()) {
+            m.setSize(4, config.nr, config.nc);
+            math21_image_set_pixel(m, config.pixel);
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_file_read(Tensor<T> &m, const char *path, const StarImageConfig &config) {
+            if (config.format >= STAR_IMAGE_YUV_I420 && config.format <= STAR_IMAGE_YUV_NV21) {
+                io_yuv420_read(path, m, config.nr, config.nc, config.format);
+            } else if (config.format == STAR_IMAGE_ARGB8888) {
+                math21_io_argb8888_read(m, config.nr, config.nc, 4, path);
+            } else if (config.format == STAR_IMAGE_MAT) {
+                img_mat_read(m, path);
+            } else {
+                MATH21_ASSERT(0, "format not support " << star_image_get_format_string(config.format))
+            }
+        }
+
+        template<typename T>
+        void img_mat_write(const Tensor<T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+            if (m.isEmpty()) {
+                m21log("image is empty");
+                return;
+            }
+            TenR B;
+            B.setSize(m.shape());
+            math21_operator_tensor_assign_elementwise(B, m);
+            math21_io_generic_type_write_to_file(B, path, 0);
+        }
+
+        //m is deinterlaced (RRR..GGG..BBB), and m(i1, i2, i3) is in [0, 255].
+        template<typename T>
+        void img_file_write(const Tensor<T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+            if (m.isEmpty()) {
+                m21log("image is empty");
+                return;
+            }
+            TenR B;
+            B.setSize(m.shape());
+            math21_operator_tensor_assign_elementwise(B, m);
+
+            if (config.format >= STAR_IMAGE_YUV_I420 && config.format <= STAR_IMAGE_YUV_NV21) {
+                io_yuv420_write(path, B, config.format);
+            } else if (config.format == STAR_IMAGE_ARGB8888) {
+                math21_io_argb8888_write(B, path);
+            } else if (config.format == STAR_IMAGE_MAT) {
+                img_mat_write(B, path);
+            } else {
+                MATH21_ASSERT(0, "format not support " << star_image_get_format_string(config.format))
+            }
+        }
+
+        //m is 2-D or 3-D tensor
+        template<typename T>
+        void _img_write_common_format(const Tensor<T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+            if (xjStrEndsWith(path, ".png")) {
+                detail::img_png_write(m, path);
+            } else if (xjStrEndsWith(path, ".jpg")) {
+                detail::img_jpg_write(m, path);
+            } else if (xjStrEndsWith(path, ".bmp")) {
+                detail::img_bmp_write(m, path);
+            } else {
+                MATH21_ASSERT(0, "image format not support!\n"
+                        << "path: " << path << "\n");
+            }
+        }
+
+        //m is 2-D or 3-D tensor
+        template<typename T>
+        void _img_write(const Tensor<T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+            if (xjStrEndsWith(path, ".png")) {
+                detail::img_png_write(m, path);
+            } else if (xjStrEndsWith(path, ".jpg")) {
+                detail::img_jpg_write(m, path);
+            } else if (xjStrEndsWith(path, ".bmp")) {
+                detail::img_bmp_write(m, path);
+            } else if (xjStrEndsWith(path, ".mat")) {
+                detail::img_mat_write(m, path);
+            } else if (xjStrEndsWith(path, ".yuv")) {
+                detail::img_file_write(m, path, config);
+            } else if (config.format) {
+                detail::img_file_write(m, path, config);
+            } else {
+                MATH21_ASSERT(0, "image format not support!\n"
+                        << "path: " << path << "\n");
+            }
+        }
+
+    }
+}

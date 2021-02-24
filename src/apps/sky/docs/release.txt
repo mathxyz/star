@@ -1,0 +1,1 @@
+// use: compile all libs static, and release the only sky file.

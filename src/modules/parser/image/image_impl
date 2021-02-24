@@ -1,0 +1,110 @@
+#pragma once
+
+#include "mat2img.h"
+
+namespace star {
+
+    //m is 2-D or 3-D tensor
+    template<typename T>
+    void img_read_common_format(Tensor <T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+        if (xjStrEndsWith(path, ".png")) {
+            detail::img_png_read(m, path);
+        } else if (xjStrEndsWith(path, ".jpg")) {
+            detail::img_jpg_read(m, path);
+        } else if (xjStrEndsWith(path, ".bmp")) {
+            detail::img_bmp_read(m, path);
+        } else {
+            MATH21_ASSERT(0, "image format not support!\n"
+                    << "path: " << path << "\n");
+        }
+    }
+
+    template<typename T>
+    void img_read(Tensor <T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+        if (xjStrEndsWith(path, ".png")) {
+            detail::img_png_read(m, path);
+        } else if (xjStrEndsWith(path, ".jpg")) {
+            detail::img_jpg_read(m, path);
+        } else if (xjStrEndsWith(path, ".bmp")) {
+            detail::img_bmp_read(m, path);
+        } else if (xjStrEndsWith(path, ".mat")) {
+            detail::img_mat_read(m, path);
+        } else if (config.format == STAR_IMAGE_BLANK) {
+            detail::img_blank_read(m, config);
+        } else if (xjStrEndsWith(path, ".yuv")) {
+            detail::img_file_read(m, path, config);
+        } else if (config.format) {
+            detail::img_file_read(m, path, config);
+        } else {
+            MATH21_ASSERT(0, "image format not support!\n"
+                    << "path: " << path << "\n");
+        }
+    }
+
+    //m is 2-D or 3-D tensor
+    template<typename T>
+    void img_write(const Tensor <T> &m, const char *path, const StarImageConfig &config = StarImageConfig()) {
+        if (config.nr > 0 || config.nc > 0) {
+            NumN nr = config.nr;
+            NumN nc = config.nc;
+            NumN nr_A = math21_image_get_nr(m);
+            NumN nc_A = math21_image_get_nc(m);
+            NumN nch_A = math21_image_get_nch(m);
+            if (nr == 0) {
+                nr = (NumN) (nc * nr_A / (NumR) nc_A);
+            } else if (nc == 0) {
+                nc = (NumN) (nr * nc_A / (NumR) nr_A);
+            }
+            TenR B;
+            math21_image_set_size(B, nr,
+                                  nc,
+                                  nch_A,
+                                  m.dims());
+            math21_la_2d_image_resize(m, B);
+            detail::_img_write(B, path, config);
+        } else {
+            detail::_img_write(m, path, config);
+        }
+    }
+
+    //save every image plane independently.
+    template<typename T>
+    void img_split_write(const Tensor <T> &m, const char *path) {
+        if (m.isEmpty()) {
+            return;
+        }
+        MATH21_ASSERT(m.dims() == 2 || m.dims() == 3, "shape doesn't match image");
+        NumB is_png = 0;
+        if (xjStrEndsWith(path, ".png")) {
+            is_png = 1;
+        } else if (xjStrEndsWith(path, ".jpg")) {
+            is_png = 0;
+        } else {
+            MATH21_ASSERT(0, "image format not support!");
+        }
+        if (m.dims() == 2) {
+            if (is_png) {
+                detail::img_png_write(m, path);
+            } else {
+                detail::img_jpg_write(m, path);
+            }
+        } else {
+            std::stringstream ss;
+            for (NumN i = 1; i <= m.dim(1); i++) {
+                VecN x(3);
+                x(1) = i;
+                TensorView<T> tv = m.shrinkView(x);
+                ss.str("");
+                ss << path;
+                ss << "_" << i;
+                if (is_png) {
+                    ss << ".png";
+                    detail::img_png_write(tv, ss.str().c_str());
+                } else {
+                    ss << ".jpg";
+                    detail::img_jpg_write(tv, ss.str().c_str());
+                }
+            }
+        }
+    }
+}

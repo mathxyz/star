@@ -1,0 +1,9 @@
+#pragma once
+
+#include "includes/star_feature_config.h"
+
+#define IS_STAR
+
+#cmakedefine STAR_RELEASE
+#cmakedefine STAR_HOME_PATH "@STAR_HOME_PATH@"
+#cmakedefine STAR_WORKING_PATH "@STAR_WORKING_PATH@"

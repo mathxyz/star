@@ -1,0 +1,34 @@
+sky
+
+# batch mode
+star_ls
+/abc/d
+--pattern
+*.jpg
+--r
+--print
+
+# src_path is null to enable batch mode.
+star_img_read_and_write
+null
+/abc/e
+--dst_suffix
+png
+
+# normal mode
+star_img_read_and_write
+/abc/d/z.jpg
+/abc/e/zz.png
+
+star_img_read_and_write
+/abc/d/1.yuv
+/abc/d/2.jpg
+--src_format
+nv12
+--nr
+288
+--nc
+352
+
+# clear global variables
+star_ls_clear

@@ -1,0 +1,1 @@
+[![Build Status](https://github.com/mathxyz/star/tree/master/src/status.svg)](https://github.com/mathxyz/math21)

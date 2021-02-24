@@ -1,0 +1,17 @@
+sky
+
+#
+ml_rl_chapter01_tic_tac_toe
+math21/src/rl/chapter01/tic_tac_toe_config.txt
+
+ml_rl_chapter02_k_armed_bandit
+math21/src/rl/chapter02/bandit_config.txt
+
+ml_rl_chapter03_grid_world
+ml_rl_chapter04_gamblers_problem
+ml_rl_chapter04_car_rental
+ml_rl_chapter04_car_rental_synchronous
+ml_rl_chapter04_grid_world
+ml_rl_chapter05_blackjack
+ml_rl_chapter06_random_walk
+ml_rl_chapter06_cliff_walking
